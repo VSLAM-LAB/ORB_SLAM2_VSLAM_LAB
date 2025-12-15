@@ -22,33 +22,45 @@
 #include <pangolin/pangolin.h>
 
 #include <mutex>
+#include <yaml-cpp/yaml.h>
 
 namespace ORB_SLAM2
 {
 
-Viewer::Viewer(System* pSystem, FrameDrawer *pFrameDrawer, MapDrawer *pMapDrawer, Tracking *pTracking, const string &strSettingPath):
+Viewer::Viewer(System* pSystem, FrameDrawer *pFrameDrawer, MapDrawer *pMapDrawer, Tracking *pTracking,
+               const string &strCalibrationPath, const string &strSettingPath, const int sensor):
     mpSystem(pSystem), mpFrameDrawer(pFrameDrawer),mpMapDrawer(pMapDrawer), mpTracker(pTracking),
     mbFinishRequested(false), mbFinished(true), mbStopped(true), mbStopRequested(false)
 {
-    cv::FileStorage fSettings(strSettingPath, cv::FileStorage::READ);
+    YAML::Node settings = YAML::LoadFile(strSettingPath);
+    YAML::Node calibration = YAML::LoadFile(strCalibrationPath);
 
-    float fps = fSettings["Camera.fps"];
-    if(fps<1)
-        fps=30;
-    mT = 1e3/fps;
+    const YAML::Node& cameras = calibration["cameras"];
 
-    mImageWidth = fSettings["Camera.width"];
-    mImageHeight = fSettings["Camera.height"];
-    if(mImageWidth<1 || mImageHeight<1)
-    {
-        mImageWidth = 640;
-        mImageHeight = 480;
+    std::string cam_name;
+    if((sensor==System::MONOCULAR) || (sensor==System::RGBD))  
+        cam_name = settings["cam_mono"].as<std::string>(); 
+    if(sensor==System::STEREO)
+        cam_name = settings["cam_stereo"].as<std::vector<std::string>>()[0];
+
+        YAML::Node cam;
+    for (int i{0}; i < cameras.size(); ++i){
+        if (cameras[i]["cam_name"].as<std::string>() == cam_name){
+            cam = cameras[i];
+            break;
+        }
     }
 
-    mViewpointX = fSettings["Viewer.ViewpointX"];
-    mViewpointY = fSettings["Viewer.ViewpointY"];
-    mViewpointZ = fSettings["Viewer.ViewpointZ"];
-    mViewpointF = fSettings["Viewer.ViewpointF"];
+    float fps = cam["fps"].as<float>();
+    mT = 1e3/fps;
+
+    mImageWidth = cam["image_dimension"][0].as<int>();
+    mImageHeight = cam["image_dimension"][1].as<int>();
+
+    mViewpointX = settings["Viewer.ViewpointX"].as<float>();
+    mViewpointY = settings["Viewer.ViewpointY"].as<float>();
+    mViewpointZ = settings["Viewer.ViewpointZ"].as<float>();
+    mViewpointF = settings["Viewer.ViewpointF"].as<float>();
 }
 
 void Viewer::Run()

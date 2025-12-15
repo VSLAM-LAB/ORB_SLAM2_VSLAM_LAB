@@ -37,84 +37,54 @@
 
 #include<mutex>
 
-
 using namespace std;
 
 namespace ORB_SLAM2
 {
 
-Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer, MapDrawer *pMapDrawer, Map *pMap, KeyFrameDatabase* pKFDB, const string &strSettingPath, const int sensor):
+Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer, MapDrawer *pMapDrawer, Map *pMap, KeyFrameDatabase* pKFDB,
+                   const string &strCalibrationPath, const string &strSettingPath,
+                   const int sensor):
     mState(NO_IMAGES_YET), mSensor(sensor), mbOnlyTracking(false), mbVO(false), mpORBVocabulary(pVoc),
     mpKeyFrameDB(pKFDB), mpInitializer(static_cast<Initializer*>(NULL)), mpSystem(pSys), mpViewer(NULL),
     mpFrameDrawer(pFrameDrawer), mpMapDrawer(pMapDrawer), mpMap(pMap), mnLastRelocFrameId(0)
-{
-    // Load camera parameters from settings file
+{   
+    // Load settings from file
+    YAML::Node settings = YAML::LoadFile(strSettingPath);
+    YAML::Node calibration = YAML::LoadFile(strCalibrationPath);
 
-    cv::FileStorage fSettings(strSettingPath, cv::FileStorage::READ);
-    float fx = fSettings["Camera.fx"];
-    float fy = fSettings["Camera.fy"];
-    float cx = fSettings["Camera.cx"];
-    float cy = fSettings["Camera.cy"];
+    const YAML::Node& cameras = calibration["cameras"];
+    YAML::Node cam;
+    if(sensor==System::STEREO){
+        std::string cam_name = settings["cam_stereo"].as<std::vector<std::string>>()[0];
+        cam = getCamera(cam_name, cameras);
 
-    cv::Mat K = cv::Mat::eye(3,3,CV_32F);
-    K.at<float>(0,0) = fx;
-    K.at<float>(1,1) = fy;
-    K.at<float>(0,2) = cx;
-    K.at<float>(1,2) = cy;
-    K.copyTo(mK);
+        std::string cam_name1 = settings["cam_stereo"].as<std::vector<std::string>>()[1];
+        YAML::Node cam1 = getCamera(cam_name1, cameras);
 
-    cv::Mat DistCoef(4,1,CV_32F);
-    DistCoef.at<float>(0) = fSettings["Camera.k1"];
-    DistCoef.at<float>(1) = fSettings["Camera.k2"];
-    DistCoef.at<float>(2) = fSettings["Camera.p1"];
-    DistCoef.at<float>(3) = fSettings["Camera.p2"];
-    const float k3 = fSettings["Camera.k3"];
-    if(k3!=0)
-    {
-        DistCoef.resize(5);
-        DistCoef.at<float>(4) = k3;
+        mbf = getStereoRectification(M1l, M2l, M1r, M2r, mK, mDistCoef, cam, cam1, calibration);
     }
-    DistCoef.copyTo(mDistCoef);
-
-    mbf = fSettings["Camera.bf"];
-
-    float fps = fSettings["Camera.fps"];
-    if(fps==0)
-        fps=30;
+    else{
+        std::string cam_name;
+        if((sensor==System::MONOCULAR) || (sensor==System::RGBD))
+            cam_name = settings["cam_mono"].as<std::string>();
+        cam = getCamera(cam_name, cameras);    
+        getCameraIntrinsics(mK, mDistCoef, cam, calibration);
+        mbf = settings["Camera.IR"].as<float>();
+    }
+    float fps = cam["fps"].as<float>();
 
     // Max/Min Frames to insert keyframes and to check relocalisation
     mMinFrames = 0;
     mMaxFrames = fps;
-
-    cout << endl << "Camera Parameters: " << endl;
-    cout << "- fx: " << fx << endl;
-    cout << "- fy: " << fy << endl;
-    cout << "- cx: " << cx << endl;
-    cout << "- cy: " << cy << endl;
-    cout << "- k1: " << DistCoef.at<float>(0) << endl;
-    cout << "- k2: " << DistCoef.at<float>(1) << endl;
-    if(DistCoef.rows==5)
-        cout << "- k3: " << DistCoef.at<float>(4) << endl;
-    cout << "- p1: " << DistCoef.at<float>(2) << endl;
-    cout << "- p2: " << DistCoef.at<float>(3) << endl;
-    cout << "- fps: " << fps << endl;
-
-
-    int nRGB = fSettings["Camera.RGB"];
-    mbRGB = nRGB;
-
-    if(mbRGB)
-        cout << "- color order: RGB (ignored if grayscale)" << endl;
-    else
-        cout << "- color order: BGR (ignored if grayscale)" << endl;
+    mbRGB = cam["cam_type"].as<std::string>() != "bgr";
 
     // Load ORB parameters
-
-    int nFeatures = fSettings["ORBextractor.nFeatures"];
-    float fScaleFactor = fSettings["ORBextractor.scaleFactor"];
-    int nLevels = fSettings["ORBextractor.nLevels"];
-    int fIniThFAST = fSettings["ORBextractor.iniThFAST"];
-    int fMinThFAST = fSettings["ORBextractor.minThFAST"];
+    int nFeatures = settings["ORBextractor.nFeatures"].as<int>();
+    float fScaleFactor = settings["ORBextractor.scaleFactor"].as<float>();
+    int nLevels = settings["ORBextractor.nLevels"].as<int>();
+    int fIniThFAST = settings["ORBextractor.iniThFAST"].as<int>();
+    int fMinThFAST = settings["ORBextractor.minThFAST"].as<int>();
 
     mpORBextractorLeft = new ORBextractor(nFeatures,fScaleFactor,nLevels,fIniThFAST,fMinThFAST);
 
@@ -132,20 +102,20 @@ Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer,
     cout << "- Minimum Fast Threshold: " << fMinThFAST << endl;
 
     if(sensor==System::STEREO || sensor==System::RGBD)
-    {
-        mThDepth = mbf*(float)fSettings["ThDepth"]/fx;
+    {   
+        float fx = mK.at<float>(0,0);
+        mThDepth = mbf*(float)settings["ThDepth"].as<float>()/fx;
         cout << endl << "Depth Threshold (Close/Far Points): " << mThDepth << endl;
     }
 
     if(sensor==System::RGBD)
     {
-        mDepthMapFactor = fSettings["DepthMapFactor"];
+        mDepthMapFactor = cam["depth_factor"].as<float>();
         if(fabs(mDepthMapFactor)<1e-5)
             mDepthMapFactor=1;
         else
             mDepthMapFactor = 1.0f/mDepthMapFactor;
     }
-
 }
 
 void Tracking::SetLocalMapper(LocalMapping *pLocalMapper)
@@ -1549,44 +1519,85 @@ void Tracking::Reset()
         mpViewer->Release();
 }
 
-void Tracking::ChangeCalibration(const string &strSettingPath)
-{
-    cv::FileStorage fSettings(strSettingPath, cv::FileStorage::READ);
-    float fx = fSettings["Camera.fx"];
-    float fy = fSettings["Camera.fy"];
-    float cx = fSettings["Camera.cx"];
-    float cy = fSettings["Camera.cy"];
-
-    cv::Mat K = cv::Mat::eye(3,3,CV_32F);
-    K.at<float>(0,0) = fx;
-    K.at<float>(1,1) = fy;
-    K.at<float>(0,2) = cx;
-    K.at<float>(1,2) = cy;
-    K.copyTo(mK);
-
-    cv::Mat DistCoef(4,1,CV_32F);
-    DistCoef.at<float>(0) = fSettings["Camera.k1"];
-    DistCoef.at<float>(1) = fSettings["Camera.k2"];
-    DistCoef.at<float>(2) = fSettings["Camera.p1"];
-    DistCoef.at<float>(3) = fSettings["Camera.p2"];
-    const float k3 = fSettings["Camera.k3"];
-    if(k3!=0)
-    {
-        DistCoef.resize(5);
-        DistCoef.at<float>(4) = k3;
-    }
-    DistCoef.copyTo(mDistCoef);
-
-    mbf = fSettings["Camera.bf"];
-
-    Frame::mbInitialComputations = true;
-}
-
 void Tracking::InformOnlyTracking(const bool &flag)
 {
     mbOnlyTracking = flag;
 }
 
+void Tracking::getCameraIntrinsics(cv::Mat& K, cv::Mat& distCoef, const YAML::Node& cam, const YAML::Node& calibration){
+    K = (cv::Mat_<float>(3, 3) << cam["focal_length"][0].as<float>(), 0.0f, cam["principal_point"][0].as<float>(),
+                0.0f, cam["focal_length"][1].as<float>(), cam["principal_point"][1].as<float>(),
+                0.0f, 0.0f, 1.0f);
 
+    distCoef = cv::Mat::zeros(4,1,CV_32F);
+    if (cam["distortion_type"] && cam["distortion_coefficients"]) {
+        std::vector<float> dist_coeffs_vec = cam["distortion_coefficients"].as<std::vector<float>>();
+        distCoef = cv::Mat(dist_coeffs_vec.size(), 1, CV_32F, dist_coeffs_vec.data()).clone(); 
+    }
+
+    cout << endl << "Camera Parameters: " << endl;
+    cout << "- cam_name: " << cam["cam_name"].as<std::string>() << endl;
+    cout << "- cam_type: " << cam["cam_type"].as<std::string>() << endl;
+    cout << "- cam_model: " << cam["cam_model"].as<std::string>() << endl;
+    if (cam["distortion_type"] && cam["distortion_coefficients"])
+        cout << "- distortion_type: " << cam["distortion_type"].as<std::string>() << endl;
+    cout << "- fx: " << K.at<float>(0,0) << endl;
+    cout << "- fy: " << K.at<float>(1,1) << endl;
+    cout << "- cx: " << K.at<float>(0,2) << endl;
+    cout << "- cy: " << K.at<float>(1,2) << endl;
+    if (cam["distortion_type"] && cam["distortion_coefficients"]){
+        cout << "- distortion_coefficients: " << distCoef.t() << endl;
+    }
+    cout << "- fps: " << cam["fps"].as<float>() << endl;
+    bool bRGB = cam["cam_type"].as<std::string>() != "bgr";
+    if(bRGB)
+        cout << "- color order: RGB (ignored if grayscale)" << endl;
+    else
+        cout << "- color order: BGR (ignored if grayscale)" << endl;
+}
+
+YAML::Node Tracking::getCamera(const std::string& cam_name, const YAML::Node& cameras){
+    for (int i{0}; i < cameras.size(); ++i) 
+        if (cameras[i]["cam_name"].as<std::string>() == cam_name) 
+            return cameras[i];
+}
+
+float Tracking::getStereoRectification(cv::Mat& M1l_, cv::Mat& M2l_, cv::Mat& M1r_, cv::Mat& M2r_,
+    cv::Mat& K_, cv::Mat& distCoef_,
+    const YAML::Node& cam0, const YAML::Node& cam1, const YAML::Node& calibration){
+
+        cv::Mat K0, distCoef0, K1, distCoef1;
+        getCameraIntrinsics(K0, distCoef0, cam0, calibration);
+        getCameraIntrinsics(K1, distCoef1, cam1, calibration);
+        cv::Size image_size(cam0["image_dimension"][0].as<int>(), cam0["image_dimension"][1].as<int>()); 
+
+        std::vector<float> T_SC_data_0 = cam0["T_SC"].as<std::vector<float>>();
+        std::vector<float> T_SC_data_1 = cam1["T_SC"].as<std::vector<float>>();
+
+        cv::Mat T_SC_0(4, 4, CV_32F);
+        cv::Mat T_SC_1(4, 4, CV_32F);
+
+        std::copy(T_SC_data_0.begin(), T_SC_data_0.end(), (float*)T_SC_0.data);
+        std::copy(T_SC_data_1.begin(), T_SC_data_1.end(), (float*)T_SC_1.data);
+
+        cv::Mat T = T_SC_1.inv() * T_SC_0;
+        cv::Mat R = T.rowRange(0,3).colRange(0,3);
+        cv::Mat t = T.rowRange(0,3).col(3);
+
+        cv::Mat R0,R1,P0,P1,Q;
+        cv::stereoRectify(K0, distCoef0, K1, distCoef1, image_size,R, t,
+            R0, R1, P0, P1, Q, cv::CALIB_ZERO_DISPARITY, 0.0, image_size);
+
+        cv::initUndistortRectifyMap(K0,distCoef0,R0,P0,image_size,CV_32F,M1l_,M2l_);
+        cv::initUndistortRectifyMap(K1,distCoef1,R1,P1,image_size,CV_32F,M1r_,M2r_);
+
+        K_ = P0.rowRange(0,3).colRange(0,3).clone();
+        K_.convertTo(K_, CV_32F);
+        distCoef_ = cv::Mat::zeros(4,1,CV_32F);
+        return float(cv::norm(t) * P0.at<double>(0,0));
+}
 
 } //namespace ORB_SLAM
+
+
+
