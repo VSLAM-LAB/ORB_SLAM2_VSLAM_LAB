@@ -17,7 +17,7 @@ namespace ORB_SLAM2{
 
 void LoadImages(const string &pathToSequence, const string &rgb_csv,
                 vector<string> &imageFilenames, vector<ORB_SLAM2::Seconds> &timestamps,
-                const string cam_name = "rgb0");
+                const string cam_name = "rgb_0");
 std::string paddingZeros(const std::string& number, const size_t numberOfZeros = 5);
 
 void removeSubstring(std::string& str, const std::string& substring) {
