@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 
 delete_if_exists() {
   local folder=$1
@@ -27,17 +28,17 @@ build_library() {
   lib_folder="$source_folder/lib"
 
   if [ "$force_build" = true ]; then
-  	delete_if_exists ${source_folder}
+  	delete_if_exists "${source_folder}"
   fi
 
   if [ "$verbose" = true ]; then
     echo "[${library_name}][build.sh] Compile ${library_name} ... "
-  	cmake -G Ninja -B $build_folder -S $source_folder -DCMAKE_PREFIX_PATH=$source_folder -DCMAKE_INSTALL_PREFIX=$source_folder
-  	cmake --build $build_folder --config Release
+  	cmake -G Ninja -B "$build_folder" -S "$source_folder" -DCMAKE_PREFIX_PATH="$source_folder" -DCMAKE_INSTALL_PREFIX="$source_folder"
+  	cmake --build "$build_folder" --config Release
   else
     echo "[${library_name}][build.sh] Compile ${library_name} (output disabled) ... "
-  	cmake -G Ninja -B $build_folder -S $source_folder -DCMAKE_PREFIX_PATH=$source_folder -DCMAKE_INSTALL_PREFIX=$source_folder > /dev/null 2>&1
-  	cmake --build $build_folder --config Release > /dev/null 2>&1
+  	cmake -G Ninja -B "$build_folder" -S "$source_folder" -DCMAKE_PREFIX_PATH="$source_folder" -DCMAKE_INSTALL_PREFIX="$source_folder" > /dev/null 2>&1
+  	cmake --build "$build_folder" --config Release > /dev/null 2>&1
   fi
 }
 
@@ -60,7 +61,7 @@ done
 
 # Baseline Dir
 LIBRARY_PATH=$(realpath "$0")
-LIBRARY_DIR=$(dirname "LIBRARY_PATH")
+LIBRARY_DIR=$(dirname "$LIBRARY_PATH")
 
 ## Build ORB-SLAM2
 library_name="ORB-SLAM2"

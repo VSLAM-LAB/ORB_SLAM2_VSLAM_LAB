@@ -96,6 +96,12 @@ public:
     // This function must be called before saving the trajectory.
     void Shutdown();
 
+    // On macOS the Pangolin/Cocoa viewer must run on the main thread.
+    void RunViewer();
+
+    // Returns true when the caller should run RunViewer() on the main thread.
+    bool ViewerRunsOnMainThread() const;
+
     // Save keyframe poses in the VSLAM-LAB dataset format.
     // This method works for all sensor input.
     // Call first Shutdown()

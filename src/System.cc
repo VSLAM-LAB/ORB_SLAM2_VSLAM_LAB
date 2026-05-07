@@ -32,6 +32,8 @@ namespace ORB_SLAM2
 System::System(const string &strVocFile, const string &strCalibrationFile, const string &strSettingsFile,
                const eSensor sensor, const bool bUseViewer):
                mSensor(sensor), mpViewer(static_cast<Viewer*>(NULL)),
+               mptLocalMapping(static_cast<std::thread*>(NULL)), mptLoopClosing(static_cast<std::thread*>(NULL)),
+               mptViewer(static_cast<std::thread*>(NULL)),
                mbReset(false), mbActivateLocalizationMode(false),
                mbDeactivateLocalizationMode(false)
 {
@@ -109,7 +111,11 @@ System::System(const string &strVocFile, const string &strCalibrationFile, const
     if(bUseViewer)
     {
         mpViewer = new Viewer(this, mpFrameDrawer,mpMapDrawer,mpTracker,strCalibrationFile,strSettingsFile,mSensor);
+#ifdef __APPLE__
+        // Cocoa/AppKit requires Pangolin's event loop to run on the process main thread.
+#else
         mptViewer = new thread(&Viewer::Run, mpViewer);
+#endif
         mpTracker->SetViewer(mpViewer);
     }
 
@@ -326,8 +332,25 @@ void System::Shutdown()
         usleep(5000);
     }
 
-    if(mpViewer)
+    if(mpViewer && mptViewer)
         pangolin::BindToContext("ORB-SLAM2: Map Viewer");
+}
+
+void System::RunViewer()
+{
+#ifdef __APPLE__
+    if(mpViewer)
+        mpViewer->Run();
+#endif
+}
+
+bool System::ViewerRunsOnMainThread() const
+{
+#ifdef __APPLE__
+    return mpViewer != NULL;
+#else
+    return false;
+#endif
 }
 
 void System::SaveKeyFrameTrajectoryVSLAMLAB(const string &filename)
